@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LicenTrack - Asset Monitor</title>
+    <!-- Tailwind CSS for Styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React and Babel for running JSX in the browser -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .animate-fade-in { animation: fadeIn 0.5s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-slate-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // Utility: Icon Wrapper for Lucide (Browser Version)
+        const Icon = ({ name, size = 20, className = "" }) => {
+            useEffect(() => {
+                lucide.createIcons();
+            }, [name]);
+            return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
+        };
+
+        const formatDate = (dateString) => {
+            if (!dateString) return 'N/A';
+            const date = new Date(dateString);
+            if (isNaN(date)) return dateString; 
+            return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        };
+
+        const getDaysRemaining = (dueDate) => {
+            if (!dueDate) return 999;
+            const today = new Date();
+            const due = new Date(dueDate);
+            const diffTime = due - today;
+            return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        };
+
+        const parseCSVLine = (text) => {
+            const result = [];
+            let cur = '';
+            let inQuote = false;
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                if (char === '"') { inQuote = !inQuote; } 
+                else if (char === ',' && !inQuote) { result.push(cur.trim()); cur = ''; } 
+                else { cur += char; }
+            }
+            result.push(cur.trim());
+            return result.map(val => val.replace(/^"|"$/g, ''));
+        };
+
+        function App() {
+            const [isAuthenticated, setIsAuthenticated] = useState(false);
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [selectedLicense, setSelectedLicense] = useState(null);
+            const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+            const [authorizedUsers, setAuthorizedUsers] = useState([
+                { email: 'finance@sttindo.com', password: 'password123', name: 'Finance Dept' },
+                { email: 'mwitono@gmail.com', password: 'password123', name: 'M. Witono' }
+            ]);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [licenses, setLicenses] = useState([]);
+
+            const upcomingRenewals = useMemo(() => {
+                return licenses.filter(license => {
+                    const date = license['Renewal Date'] || license.renewalDate;
+                    const days = getDaysRemaining(date);
+                    return days >= 0 && days <= 20;
+                }).sort((a, b) => {
+                    const dateA = a['Renewal Date'] || a.renewalDate;
+                    const dateB = b['Renewal Date'] || b.renewalDate;
+                    return new Date(dateA) - new Date(dateB);
+                });
+            }, [licenses]);
+
+            const handleLogin = (email, password) => {
+                const userMatch = authorizedUsers.find(u => u.email === email.toLowerCase().trim() && u.password === password);
+                if (userMatch) {
+                    setIsAuthenticated(true);
+                    setCurrentUser(userMatch);
+                } else {
+                    alert('Access Denied: Invalid email or access key.');
+                }
+            };
+
+            const handlePasswordUpdate = (newPassword) => {
+                setAuthorizedUsers(prev => prev.map(u => 
+                    u.email === currentUser.email ? { ...u, password: newPassword } : u
+                ));
+                setCurrentUser(prev => ({ ...prev, password: newPassword }));
+                alert('Access Key updated successfully!');
+            };
+
+            const handleFileUpload = (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const text = e.target.result;
+                        const rows = text.split(/\r?\n/);
+                        if (rows.length < 2) return;
+                        const headers = parseCSVLine(rows[0]);
+                        const newEntries = rows.slice(1)
+                            .filter(row => row.trim() !== '')
+                            .map((row, index) => {
+                                const parts = parseCSVLine(row);
+                                const entry = { id: Date.now() + index };
+                                headers.forEach((header, i) => {
+                                    entry[header] = parts[i] || '';
+                                });
+                                return entry;
+                            });
+                        setLicenses(newEntries);
+                        setActiveTab('dashboard');
+                    };
+                    reader.readAsText(file);
+                }
+            };
+
+            if (!isAuthenticated) return <LoginPage onLogin={handleLogin} />;
+
+            return (
+                <div className="flex h-screen bg-[#F8FAFC] overflow-hidden">
+                    <aside className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-[#0F172A] text-white transition-all duration-300 flex flex-col z-20 shadow-2xl shrink-0`}>
+                        <div className="p-6 flex items-center gap-3 border-b border-slate-800">
+                            <div className="bg-emerald-500 p-1.5 rounded-lg">
+                                <Icon name="shield-check" className="text-white" />
+                            </div>
+                            {isSidebarOpen && <span className="font-bold text-xl tracking-tight uppercase">LicenTrack</span>}
+                        </div>
+                        <nav className="flex-1 mt-8 px-3 space-y-2">
+                            <NavItem icon="layout-dashboard" label="Dashboard" isActive={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} isOpen={isSidebarOpen} />
+                            <NavItem icon="file-text" label="All Accounts" isActive={activeTab === 'all'} onClick={() => setActiveTab('all')} isOpen={isSidebarOpen} />
+                            <NavItem icon="upload" label="Import Data" isActive={activeTab === 'import'} onClick={() => setActiveTab('import')} isOpen={isSidebarOpen} />
+                            <div className="pt-4 mt-4 border-t border-slate-800">
+                                <NavItem icon="settings" label="Maintenance" isActive={activeTab === 'maintenance'} onClick={() => setActiveTab('maintenance')} isOpen={isSidebarOpen} />
+                            </div>
+                        </nav>
+                        <div className="p-4 border-t border-slate-800">
+                            <button onClick={() => setIsAuthenticated(false)} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-red-500/10 text-slate-400 hover:text-red-400 transition-all">
+                                <Icon name="log-out" />
+                                {isSidebarOpen && <span className="font-medium">Sign Out</span>}
+                            </button>
+                        </div>
+                    </aside>
+
+                    <main className="flex-1 overflow-y-auto flex flex-col relative">
+                        <header className="bg-white/80 backdrop-blur-md border-b border-slate-200 h-20 flex items-center justify-between px-8 sticky top-0 z-10">
+                            <div className="flex items-center gap-6">
+                                <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2.5 hover:bg-slate-100 rounded-xl transition-colors border border-slate-200">
+                                    <Icon name="menu" className="text-slate-600" />
+                                </button>
+                                <h1 className="text-2xl font-bold text-slate-900 tracking-tight capitalize">{activeTab}</h1>
+                            </div>
+                            <div className="flex items-center gap-4">
+                                <div className="text-right hidden sm:block">
+                                    <p className="text-sm font-bold text-slate-900">{currentUser?.name}</p>
+                                    <p className="text-[10px] text-emerald-600 font-black uppercase tracking-widest">{currentUser?.email}</p>
+                                </div>
+                                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-white font-bold text-lg shadow-lg">
+                                    {currentUser?.name.charAt(0)}
+                                </div>
+                            </div>
+                        </header>
+
+                        <div className="p-8 max-w-7xl mx-auto w-full animate-fade-in">
+                            {activeTab === 'dashboard' && <DashboardView upcoming={upcomingRenewals} total={licenses.length} onSelect={setSelectedLicense} />}
+                            {activeTab === 'all' && <ListView licenses={licenses} onSelect={setSelectedLicense} />}
+                            {activeTab === 'import' && <ImportView onUpload={handleFileUpload} />}
+                            {activeTab === 'maintenance' && <MaintenanceView user={currentUser} onUpdate={handlePasswordUpdate} />}
+                        </div>
+                    </main>
+
+                    {selectedLicense && (
+                        <DetailPanel license={selectedLicense} onClose={() => setSelectedLicense(null)} />
+                    )}
+                </div>
+            );
+        }
+
+        const NavItem = ({ icon, label, isActive, onClick, isOpen }) => (
+            <button onClick={onClick} className={`flex items-center gap-3 w-full p-3.5 rounded-xl transition-all ${isActive ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'}`}>
+                <Icon name={icon} />
+                {isOpen && <span className="font-semibold">{label}</span>}
+            </button>
+        );
+
+        const LoginPage = ({ onLogin }) => {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            return (
+                <div className="min-h-screen flex items-center justify-center bg-slate-100 p-6">
+                    <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl overflow-hidden">
+                        <div className="p-10 bg-[#0F172A] text-center">
+                            <div className="inline-flex items-center justify-center p-4 bg-emerald-500 rounded-2xl mb-6 shadow-xl">
+                                <Icon name="shield-check" size={32} className="text-white" />
+                            </div>
+                            <h2 className="text-3xl font-black text-white italic">LicenTrack</h2>
+                            <p className="text-slate-400 font-bold mt-2 uppercase tracking-widest text-[10px]">Finance Access Portal</p>
+                        </div>
+                        <form onSubmit={(e) => { e.preventDefault(); onLogin(email, password); }} className="p-10 space-y-6">
+                            <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-5 py-4 rounded-2xl border bg-slate-50 font-medium outline-none focus:ring-4 focus:ring-emerald-500/10" placeholder="Email Address" required />
+                            <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full px-5 py-4 rounded-2xl border bg-slate-50 font-medium outline-none focus:ring-4 focus:ring-emerald-500/10" placeholder="Access Key" required />
+                            <button type="submit" className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-xl transition-all">SIGN IN</button>
+                            <p className="text-[10px] text-center text-slate-400 uppercase font-bold">Authorized STT Indo Personnel Only</p>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        const DashboardView = ({ upcoming, total, onSelect }) => (
+            <div className="space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <StatCard icon="file-text" label="Database Records" value={total} color="text-blue-600" bg="bg-blue-50" />
+                    <StatCard icon="clock" label="Due < 20 Days" value={upcoming.length} color="text-amber-600" bg="bg-amber-50" />
+                    <StatCard icon="check-circle" label="Auth Status" value="Secure" color="text-emerald-600" bg="bg-emerald-50" />
+                </div>
+                <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="p-8 border-b bg-slate-50/50 flex justify-between items-center">
+                        <h2 className="font-black text-xl italic tracking-tight">Renewal Pipeline (20 Day Window)</h2>
+                    </div>
+                    <div className="divide-y">
+                        {upcoming.length > 0 ? upcoming.map(l => (
+                            <div key={l.id} onClick={() => onSelect(l)} className="p-6 flex items-center justify-between hover:bg-slate-50 cursor-pointer transition-all group">
+                                <div className="flex items-center gap-5">
+                                    <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center group-hover:bg-emerald-100 transition-colors">
+                                        <Icon name="calendar-days" className="text-slate-400 group-hover:text-emerald-600" />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-black text-slate-900 text-lg group-hover:text-emerald-600">{l.Company}</h3>
+                                        <p className="text-sm text-slate-500 font-bold">{l.Service} — {l.Plan}</p>
+                                    </div>
+                                </div>
+                                <div className="px-5 py-2 rounded-xl bg-amber-500 text-white font-black text-xs shadow-md">
+                                    {getDaysRemaining(l['Renewal Date'])} DAYS LEFT
+                                </div>
+                            </div>
+                        )) : <div className="p-20 text-center font-bold text-slate-300">NO PENDING RENEWALS</div>}
+                    </div>
+                </div>
+            </div>
+        );
+
+        const StatCard = ({ icon, label, value, color, bg }) => (
+            <div className="bg-white p-7 rounded-[2rem] border flex items-center gap-5 shadow-sm">
+                <div className={`p-4 ${bg} ${color} rounded-2xl shadow-inner`}><Icon name={icon} size={28} /></div>
+                <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</p>
+                    <p className="text-3xl font-black text-slate-900 tracking-tight">{value}</p>
+                </div>
+            </div>
+        );
+
+        const ListView = ({ licenses, onSelect }) => {
+            const [search, setSearch] = useState('');
+            const filtered = licenses.filter(l => l.Company?.toLowerCase().includes(search.toLowerCase()));
+            return (
+                <div className="space-y-6">
+                    <input type="text" placeholder="Search accounts..." value={search} onChange={e => setSearch(e.target.value)} className="w-full max-w-md px-6 py-4 rounded-2xl border outline-none focus:ring-4 focus:ring-emerald-500/10 shadow-sm font-medium" />
+                    <div className="bg-white rounded-[2rem] border overflow-hidden shadow-sm">
+                        <table className="w-full text-left">
+                            <thead className="bg-slate-50 border-b text-[10px] font-black uppercase text-slate-400 tracking-widest">
+                                <tr><th className="px-8 py-5">Company</th><th className="px-6 py-5">Service</th><th className="px-6 py-5">Date</th><th className="px-8 py-5 text-center">Action</th></tr>
+                            </thead>
+                            <tbody className="divide-y">
+                                {filtered.map(l => (
+                                    <tr key={l.id} className="hover:bg-slate-50">
+                                        <td className="px-8 py-5 font-black">{l.Company}</td>
+                                        <td className="px-6 py-5 text-sm font-bold text-slate-500">{l.Service}</td>
+                                        <td className="px-6 py-5 text-sm font-black">{formatDate(l['Renewal Date'])}</td>
+                                        <td className="px-8 py-5 text-center"><button onClick={() => onSelect(l)} className="px-4 py-2 bg-slate-900 text-white text-[10px] font-black rounded-xl hover:bg-emerald-600 transition-all uppercase">Audit</button></td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        };
+
+        const DetailPanel = ({ license, onClose }) => {
+            const days = getDaysRemaining(license['Renewal Date']);
+            return (
+                <div className="fixed inset-0 z-50 flex justify-end">
+                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose}></div>
+                    <div className="relative w-full max-w-lg bg-white h-full shadow-2xl p-10 flex flex-col space-y-8 animate-fade-in">
+                        <div className="flex justify-between items-center"><h2 className="text-sm font-black text-emerald-600 uppercase tracking-widest">Audit Trail</h2><button onClick={onClose}><Icon name="x" size={28}/></button></div>
+                        <div>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Entity Name</p>
+                            <h3 className="text-4xl font-black text-slate-900 tracking-tighter leading-none">{license.Company}</h3>
+                            <p className="mt-4 text-sm font-bold text-slate-500 uppercase tracking-widest">{license.Service} — {license.Plan}</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="p-6 bg-slate-50 rounded-3xl border">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Due Date</p>
+                                <p className="text-lg font-black text-slate-900">{formatDate(license['Renewal Date'])}</p>
+                            </div>
+                            <div className="p-6 bg-slate-50 rounded-3xl border">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Amount</p>
+                                <p className="text-lg font-black text-emerald-600">{license['Renewal Amount']}</p>
+                            </div>
+                        </div>
+                        <div className="p-8 bg-[#0F172A] rounded-[2.5rem] text-white">
+                            <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2"><Icon name="credit-card" className="text-emerald-500" size={16}/> Payment Security</h4>
+                            <div className="space-y-4">
+                                <div className="flex justify-between items-center"><span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Card Info</span><span className="font-mono font-black text-emerald-400">{license['Card Info']}</span></div>
+                                <div className="flex justify-between items-center"><span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Expiry Date</span><span className="font-black">{license['Card Expiry Date']}</span></div>
+                            </div>
+                        </div>
+                        <div className="flex-1"></div>
+                        <button onClick={onClose} className="w-full py-5 bg-slate-900 text-white font-black rounded-2xl tracking-widest hover:bg-emerald-600 transition-all">DISMISS AUDIT</button>
+                    </div>
+                </div>
+            );
+        };
+
+        const ImportView = ({ onUpload }) => (
+            <div className="max-w-2xl mx-auto py-12 text-center">
+                <div className="bg-white p-12 rounded-[3rem] shadow-xl border relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-2 bg-emerald-500"></div>
+                    <div className="w-24 h-24 bg-emerald-50 text-emerald-600 rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-inner"><Icon name="upload" size={48} /></div>
+                    <h2 className="text-3xl font-black text-slate-900 tracking-tight italic uppercase">Sync Assets</h2>
+                    <p className="text-slate-500 mb-10 text-lg font-medium">Drag or select <span className="text-emerald-600 font-black">Accounts.csv</span> to update data.</p>
+                    <label className="cursor-pointer block">
+                        <input type="file" accept=".csv" onChange={onUpload} className="hidden" />
+                        <div className="py-6 px-10 bg-emerald-600 text-white font-black rounded-3xl shadow-xl hover:bg-emerald-700 active:scale-95 transition-all text-xl">START UPLOAD</div>
+                    </label>
+                </div>
+            </div>
+        );
+
+        const MaintenanceView = ({ user, onUpdate }) => {
+            const [pass, setPass] = useState('');
+            return (
+                <div className="max-w-xl mx-auto py-12">
+                    <div className="bg-white p-10 rounded-[2.5rem] shadow-xl border">
+                        <div className="flex items-center gap-4 mb-8">
+                            <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl"><Icon name="key-round" size={24} /></div>
+                            <div><h2 className="text-2xl font-black text-slate-900">Security</h2><p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Update Access Key for {user.email}</p></div>
+                        </div>
+                        <input type="password" value={pass} onChange={e => setPass(e.target.value)} className="w-full px-5 py-4 rounded-2xl border bg-slate-50 font-medium mb-4 outline-none focus:ring-4 focus:ring-blue-500/10" placeholder="New Access Key" />
+                        <button onClick={() => onUpdate(pass)} className="w-full py-4 bg-blue-600 text-white font-black rounded-2xl shadow-xl hover:bg-blue-700 transition-all">UPDATE SECURITY</button>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
